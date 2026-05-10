@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "感官刺客",
+  "version": "1.3.0",
+  "description": "按快捷键或点图标激活当前页,按尺寸过滤抓高清大图,支持下载、复制到剪贴板、按加载时间/尺寸排序；新增粘贴图片后通过 shadow-lantern 反解 Markdown 风格提示词。支持字节CDN / 小红书 / 七牛 / 阿里OSS 自动规整成原图。",
+  "permissions": ["downloads", "scripting", "activeTab"],
+  "host_permissions": ["<all_urls>"],
+  "icons": {
+    "16":  "icons/icon-16.png",
+    "32":  "icons/icon-32.png",
+    "48":  "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "感官刺客(Alt+Shift+G)",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+G",
+        "mac": "Alt+Shift+G"
+      },
+      "description": "激活 / 关闭感官刺客面板"
+    }
+  }
+}
