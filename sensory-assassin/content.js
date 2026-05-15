@@ -87,27 +87,7 @@
   }
 
   function isVideoUrl(url) {
-    return /\.(mp4|webm|mov|m4v)(?:[?#/]|$)/i.test(String(url));
-  }
-
-  function decodeMaybeEscapedUrl(value) {
-    if (!value) return '';
-    let text = String(value).trim();
-    text = text
-      .replace(/\\u0026/g, '&')
-      .replace(/\\u003d/g, '=')
-      .replace(/\\u0025/g, '%')
-      .replace(/\\\//g, '/')
-      .replace(/&amp;/g, '&');
-    try {
-      text = decodeURIComponent(text);
-    } catch {}
-    return text;
-  }
-
-  function addVideoCandidate(rawUrl, srcEl) {
-    const decoded = decodeMaybeEscapedUrl(rawUrl);
-    if (isVideoUrl(decoded)) tryAddVideoUrl(decoded, srcEl || null);
+    return /\.(mp4|webm|mov|m4v)(?:\?|#|$)/i.test(String(url));
   }
 
   function tryAddVideoUrl(rawUrl, srcEl) {
@@ -146,59 +126,8 @@
   function scanVideoLinks() {
     document.querySelectorAll('a[href], source[src]').forEach((el) => {
       const raw = el.href || el.src;
-      addVideoCandidate(raw, null);
+      if (isVideoUrl(raw)) tryAddVideoUrl(raw, null);
     });
-  }
-
-  function scanVideoMeta() {
-    document.querySelectorAll('meta[property="og:video"], meta[property="og:video:url"], meta[property="og:video:secure_url"], meta[name="twitter:player:stream"]').forEach((meta) => {
-      addVideoCandidate(meta.content, null);
-    });
-  }
-
-  function scanVideoAttributes() {
-    const attrs = ['src', 'href', 'data-src', 'data-video-url', 'data-video-src', 'data-url'];
-    document.querySelectorAll('*').forEach((el) => {
-      for (const attr of attrs) {
-        const value = el.getAttribute && el.getAttribute(attr);
-        if (value) addVideoCandidate(value, null);
-      }
-    });
-  }
-
-  function scanPerformanceVideos() {
-    try {
-      performance.getEntriesByType('resource').forEach((entry) => {
-        const name = entry && entry.name;
-        if (!name) return;
-        if (entry.initiatorType === 'video' || entry.initiatorType === 'media' || isVideoUrl(name)) {
-          addVideoCandidate(name, null);
-        }
-      });
-    } catch {}
-  }
-
-  function scanScriptVideos() {
-    const urlRe = /https?:\\?\/\\?\/[^"'<>\s]+/g;
-    document.querySelectorAll('script').forEach((script) => {
-      const text = script.textContent || '';
-      if (!text || !/mp4|webm|video_url|playback_url/i.test(text)) return;
-      let m;
-      while ((m = urlRe.exec(text)) !== null) {
-        addVideoCandidate(m[0], null);
-      }
-    });
-  }
-
-  function scanVideoSources(deep = false) {
-    document.querySelectorAll('video').forEach(tryAddVideo);
-    scanVideoLinks();
-    scanVideoMeta();
-    scanPerformanceVideos();
-    if (deep) {
-      scanVideoAttributes();
-      scanScriptVideos();
-    }
   }
 
   function extractBgUrls(bg, sink) {
@@ -215,7 +144,8 @@
       scanTimer = null;
       // <img>
       document.querySelectorAll('img').forEach(tryAdd);
-      scanVideoSources(deep);
+      document.querySelectorAll('video').forEach(tryAddVideo);
+      scanVideoLinks();
       // inline style 上的 background-image(快,覆盖大多数 lightbox)
       document.querySelectorAll('[style*="background"]').forEach((el) => {
         extractBgUrls(el.style.backgroundImage, tryAddByUrl);
@@ -243,7 +173,7 @@
             n.querySelectorAll('video').forEach(tryAddVideo);
             n.querySelectorAll('a[href], source[src]').forEach((el) => {
               const raw = el.href || el.src;
-              addVideoCandidate(raw, null);
+              if (isVideoUrl(raw)) tryAddVideoUrl(raw, null);
             });
           }
           // 节点自身带 inline bg
@@ -650,7 +580,7 @@
       empty.innerHTML =
         `暂未扫到网页视频<br>` +
         `<span style="font-size:11px">` +
-        `· 支持 video/source、meta、资源列表和 mp4/webm/mov/m4v 直链<br>` +
+        `· 支持 video/source 和 mp4/webm/mov/m4v 直链<br>` +
         `· 让目标视频加载后再点「重扫」<br>` +
         `· blob 视频流暂不能直接下载` +
         `</span>`;
@@ -784,7 +714,7 @@
     const rescan = document.createElement('button');
     rescan.textContent = '重扫';
     rescan.style.cssText = 'background:#444;color:#fff;border:none;padding:5px 10px;border-radius:4px;cursor:pointer;font-size:12px;';
-    rescan.onclick = () => { flashBtn(rescan, '深扫中…', '#555', 700); rebuild(); };
+    rescan.onclick = () => { flashBtn(rescan, '扫描中…', '#555', 700); rebuild(); };
     const dlAll = document.createElement('button');
     dlAll.textContent = '全部下载';
     dlAll.style.cssText = 'background:#6c5ce7;color:#fff;border:none;padding:5px 10px;border-radius:4px;cursor:pointer;font-size:12px;margin-left:auto;';
@@ -846,7 +776,7 @@
     const videoRescan = document.createElement('button');
     videoRescan.textContent = '重扫';
     videoRescan.style.cssText = 'background:#444;color:#fff;border:none;padding:5px 10px;border-radius:4px;cursor:pointer;font-size:12px;';
-    videoRescan.onclick = () => { flashBtn(videoRescan, '深扫中…', '#555', 700); rebuild(); };
+    videoRescan.onclick = () => { flashBtn(videoRescan, '扫描中…', '#555', 700); rebuild(); };
     const videoDlAll = document.createElement('button');
     videoDlAll.textContent = '全部下载';
     videoDlAll.style.cssText = 'background:#6c5ce7;color:#fff;border:none;padding:5px 10px;border-radius:4px;cursor:pointer;font-size:12px;margin-left:auto;';
