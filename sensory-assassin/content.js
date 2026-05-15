@@ -710,19 +710,43 @@
 
   function buildVideoPreview(item) {
     const boxCss = 'width:72px;height:72px;object-fit:cover;border-radius:4px;flex-shrink:0;background:#222;display:block;';
-    if (item.srcEl && item.srcEl.isConnected && (item.srcEl.videoWidth || item.srcEl.readyState >= 2)) {
-      return buildVideoThumbCanvas(item.srcEl);
+    const video = document.createElement('video');
+    video.src = item.url;
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'metadata';
+    video.disablePictureInPicture = true;
+    video.controls = false;
+    video.style.cssText = boxCss;
+
+    function fallback() {
+      if (item.srcEl && item.srcEl.isConnected && item.srcEl.poster) {
+        const img = document.createElement('img');
+        img.src = item.srcEl.poster;
+        img.referrerPolicy = 'no-referrer';
+        img.loading = 'lazy';
+        img.style.cssText = boxCss;
+        img.onerror = () => { img.replaceWith(buildVideoPlaceholder()); };
+        video.replaceWith(img);
+      } else if (item.srcEl && item.srcEl.isConnected && (item.srcEl.videoWidth || item.srcEl.readyState >= 2)) {
+        video.replaceWith(buildVideoThumbCanvas(item.srcEl));
+      } else {
+        video.replaceWith(buildVideoPlaceholder());
+      }
     }
-    if (item.srcEl && item.srcEl.isConnected && item.srcEl.poster) {
-      const img = document.createElement('img');
-      img.src = item.srcEl.poster;
-      img.referrerPolicy = 'no-referrer';
-      img.loading = 'lazy';
-      img.style.cssText = boxCss;
-      img.onerror = () => { img.replaceWith(buildVideoPlaceholder()); };
-      return img;
-    }
-    return buildVideoPlaceholder();
+
+    video.addEventListener('loadedmetadata', () => {
+      if (!item.w || !item.h) {
+        item.w = video.videoWidth || item.w || 0;
+        item.h = video.videoHeight || item.h || 0;
+        item.area = item.w * item.h;
+      }
+      try {
+        if (Number.isFinite(video.duration) && video.duration > 1) video.currentTime = Math.min(0.25, video.duration / 8);
+      } catch {}
+    }, { once: true });
+    video.addEventListener('error', fallback, { once: true });
+    return video;
   }
 
   function buildVideoPlaceholder() {
