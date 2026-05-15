@@ -708,25 +708,59 @@
     return canvas;
   }
 
+  function buildVideoPreview(item) {
+    const boxCss = 'width:72px;height:72px;object-fit:cover;border-radius:4px;flex-shrink:0;background:#222;display:block;';
+    const video = document.createElement('video');
+    video.src = item.url;
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'metadata';
+    video.disablePictureInPicture = true;
+    video.controls = false;
+    video.style.cssText = boxCss;
+
+    function fallback() {
+      if (item.srcEl && item.srcEl.isConnected && item.srcEl.poster) {
+        const img = document.createElement('img');
+        img.src = item.srcEl.poster;
+        img.referrerPolicy = 'no-referrer';
+        img.loading = 'lazy';
+        img.style.cssText = boxCss;
+        img.onerror = () => { img.replaceWith(buildVideoPlaceholder()); };
+        video.replaceWith(img);
+      } else if (item.srcEl && item.srcEl.isConnected && (item.srcEl.videoWidth || item.srcEl.readyState >= 2)) {
+        video.replaceWith(buildVideoThumbCanvas(item.srcEl));
+      } else {
+        video.replaceWith(buildVideoPlaceholder());
+      }
+    }
+
+    video.addEventListener('loadedmetadata', () => {
+      if (!item.w || !item.h) {
+        item.w = video.videoWidth || item.w || 0;
+        item.h = video.videoHeight || item.h || 0;
+        item.area = item.w * item.h;
+      }
+      try {
+        if (Number.isFinite(video.duration) && video.duration > 1) video.currentTime = Math.min(0.25, video.duration / 8);
+      } catch {}
+    }, { once: true });
+    video.addEventListener('error', fallback, { once: true });
+    return video;
+  }
+
+  function buildVideoPlaceholder() {
+    const thumb = document.createElement('div');
+    thumb.textContent = 'VIDEO';
+    thumb.style.cssText = 'width:72px;height:72px;border-radius:4px;flex-shrink:0;background:#222;color:#777;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;letter-spacing:0;';
+    return thumb;
+  }
+
   function buildVideoRow(item) {
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;gap:10px;align-items:center;padding:8px 10px;border-bottom:1px solid #2a2a2a;font-size:12px;';
 
-    let thumb;
-    if (item.srcEl && item.srcEl.isConnected && (item.srcEl.videoWidth || item.srcEl.readyState >= 2)) {
-      thumb = buildVideoThumbCanvas(item.srcEl);
-    } else if (item.srcEl && item.srcEl.isConnected && item.srcEl.poster) {
-      thumb = document.createElement('img');
-      thumb.src = item.srcEl.poster;
-      thumb.referrerPolicy = 'no-referrer';
-      thumb.loading = 'lazy';
-      thumb.style.cssText = 'width:72px;height:72px;object-fit:cover;border-radius:4px;flex-shrink:0;background:#222;';
-      thumb.onerror = () => { thumb.style.visibility = 'hidden'; };
-    } else {
-      thumb = document.createElement('div');
-      thumb.textContent = 'VIDEO';
-      thumb.style.cssText = 'width:72px;height:72px;border-radius:4px;flex-shrink:0;background:#222;color:#777;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;letter-spacing:0;';
-    }
+    const thumb = buildVideoPreview(item);
 
     const meta = document.createElement('div');
     meta.style.cssText = 'flex:1;min-width:0;';
