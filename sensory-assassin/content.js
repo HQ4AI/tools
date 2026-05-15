@@ -106,20 +106,85 @@
   }
 
   function addVideoCandidate(rawUrl, srcEl) {
+    tryAddVideoUrl(rawUrl, srcEl || null);
+  }
+
+  function normalizeVideoCandidate(rawUrl) {
     const decoded = decodeMaybeEscapedUrl(rawUrl);
-    if (isVideoUrl(decoded)) tryAddVideoUrl(decoded, srcEl || null);
+    if (!decoded || !isVideoUrl(decoded)) return null;
+    try {
+      const u = new URL(decoded, location.href);
+      if (!/^https?:$/i.test(u.protocol)) return null;
+      const wasByteRange = u.searchParams.has('bytestart') || u.searchParams.has('byteend');
+      u.searchParams.delete('bytestart');
+      u.searchParams.delete('byteend');
+      return { url: u.toString(), wasByteRange };
+    } catch {
+      return null;
+    }
+  }
+
+  function parseInstagramVideoInfo(url) {
+    try {
+      const u = new URL(url);
+      const raw = u.searchParams.get('efg');
+      if (!raw) return {};
+      const json = JSON.parse(atob(decodeURIComponent(raw)));
+      return {
+        assetId: json.xpv_asset_id || json.video_id || '',
+        bitrate: Number(json.bitrate || 0),
+        duration: Number(json.duration_s || 0),
+        tag: json.vencode_tag || '',
+      };
+    } catch {
+      return {};
+    }
+  }
+
+  function videoIdentity(url, info) {
+    if (info && info.assetId) return 'ig:' + info.assetId;
+    try {
+      const u = new URL(url);
+      return u.origin + u.pathname;
+    } catch {
+      return url;
+    }
+  }
+
+  function videoScore(item) {
+    return (item.area || 0) + (item.bitrate || 0) + (item.transferSize || 0) + (item.wasByteRange ? 1 : 0);
   }
 
   function tryAddVideoUrl(rawUrl, srcEl) {
-    if (!rawUrl) return;
-    if (rawUrl.startsWith('data:') || rawUrl.startsWith('blob:')) return;
-    if (!/^https?:/i.test(rawUrl)) return;
-    const key = normalize(rawUrl);
-    if (videoItems.has(key)) return;
+    const normalized = normalizeVideoCandidate(rawUrl);
+    if (!normalized) return;
+    const key = normalize(normalized.url);
     const w = srcEl ? (srcEl.videoWidth || srcEl.clientWidth || 0) : 0;
     const h = srcEl ? (srcEl.videoHeight || srcEl.clientHeight || 0) : 0;
     if (w && h && w < minDim && h < minDim) return;
-    videoItems.set(key, { url: key, w, h, ts: ++seq, area: w * h, srcEl });
+    const info = parseInstagramVideoInfo(key);
+    const identity = videoIdentity(key, info);
+    const next = {
+      url: key,
+      w,
+      h,
+      ts: ++seq,
+      area: w * h,
+      srcEl,
+      identity,
+      wasByteRange: normalized.wasByteRange,
+      bitrate: info.bitrate || 0,
+      duration: info.duration || 0,
+      tag: info.tag || '',
+      transferSize: 0,
+    };
+    for (const [existingKey, existing] of videoItems.entries()) {
+      if (existing.identity !== identity) continue;
+      if (videoScore(existing) >= videoScore(next)) return;
+      videoItems.delete(existingKey);
+      break;
+    }
+    videoItems.set(key, next);
     scheduleRender();
   }
 
@@ -172,7 +237,13 @@
         const name = entry && entry.name;
         if (!name) return;
         if (entry.initiatorType === 'video' || entry.initiatorType === 'media' || isVideoUrl(name)) {
+          const before = videoItems.size;
           addVideoCandidate(name, null);
+          if (videoItems.size !== before) {
+            const normalized = normalizeVideoCandidate(name);
+            const item = normalized && videoItems.get(normalize(normalized.url));
+            if (item) item.transferSize = Number(entry.transferSize || entry.encodedBodySize || 0);
+          }
         }
       });
     } catch {}
@@ -652,7 +723,7 @@
         `<span style="font-size:11px">` +
         `· 支持 video/source、meta、资源列表和 mp4/webm/mov/m4v 直链<br>` +
         `· 让目标视频加载后再点「重扫」<br>` +
-        `· blob 视频流暂不能直接下载` +
+        `· Instagram byte-range 分片会先规整成完整候选` +
         `</span>`;
       videoList.appendChild(empty);
     } else {
