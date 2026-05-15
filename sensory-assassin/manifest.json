@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "感官刺客",
   "version": "1.3.0",
-  "description": "按快捷键或点图标激活当前页,按尺寸过滤抓高清大图,支持下载、复制到剪贴板、按加载时间/尺寸排序；新增粘贴图片后通过 shadow-lantern 反解 Markdown 风格提示词。支持字节CDN / 小红书 / 七牛 / 阿里OSS 自动规整成原图。",
+  "description": "按快捷键或点图标激活当前页,按尺寸过滤抓高清大图与网页视频,支持下载图片/视频、复制图片到剪贴板、按加载时间/尺寸排序；粘贴图片后通过 shadow-lantern 反解 Markdown 风格提示词。支持字节CDN / 小红书 / 七牛 / 阿里OSS 自动规整成原图。",
   "permissions": ["downloads", "scripting", "activeTab"],
   "host_permissions": ["<all_urls>"],
   "icons": {

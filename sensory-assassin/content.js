@@ -10,10 +10,12 @@
   let minDim = Number(localStorage.getItem('__hdgrab_minw') || 500);
   let sortMode = localStorage.getItem('__hdgrab_sort') || 'time-desc';
   const items = new Map(); // key -> { url, thumb, w, h, ts, area }
-  let panel, imageTab, styleTab, list, countEl, widthInput, sortSelect, stylePreview, styleOutput, styleStatus, styleRunBtn, styleCopyBtn;
+  const videoItems = new Map(); // key -> { url, w, h, ts, area, srcEl }
+  let panel, imageTab, videoTab, styleTab, list, videoList, countEl, widthInput, sortSelect, stylePreview, styleOutput, styleStatus, styleRunBtn, styleCopyBtn;
   let granularityOne, granularityTwo;
   let pastedStyleImage = null;
   let styleGranularity = Number(localStorage.getItem('__hdgrab_style_granularity') || 1) === 2 ? 2 : 1;
+  let activeTab = 'image';
   let seq = 0;
 
   // —— URL 规整:只做"安全动作",不改会让签名失效的路径 ——
@@ -31,19 +33,19 @@
     }
   }
 
-  function guessExt(url) {
-    const m = String(url).match(/\.(jpe?g|png|webp|gif|avif|heic)(?:\?|#|$)/i);
+  function guessExt(url, fallback) {
+    const m = String(url).match(/\.(jpe?g|png|webp|gif|avif|heic|mp4|webm|mov|m4v)(?:\?|#|$)/i);
     if (m) return m[1].toLowerCase().replace('jpeg', 'jpg');
-    return 'jpg';
+    return fallback || 'jpg';
   }
 
-  function filenameFor(url) {
+  function filenameFor(url, fallbackExt) {
     try {
       const last = (new URL(url).pathname.split('/').pop() || 'img').split('~')[0];
       const base = (last.replace(/\.[^.]+$/, '') || 'img').slice(0, 40);
-      return base + '.' + guessExt(url);
+      return base + '.' + guessExt(url, fallbackExt);
     } catch {
-      return 'img_' + Date.now() + '.' + guessExt(url);
+      return 'media_' + Date.now() + '.' + guessExt(url, fallbackExt);
     }
   }
 
@@ -84,6 +86,50 @@
     probe.src = rawUrl;
   }
 
+  function isVideoUrl(url) {
+    return /\.(mp4|webm|mov|m4v)(?:\?|#|$)/i.test(String(url));
+  }
+
+  function tryAddVideoUrl(rawUrl, srcEl) {
+    if (!rawUrl) return;
+    if (rawUrl.startsWith('data:') || rawUrl.startsWith('blob:')) return;
+    if (!/^https?:/i.test(rawUrl)) return;
+    const key = normalize(rawUrl);
+    if (videoItems.has(key)) return;
+    const w = srcEl ? (srcEl.videoWidth || srcEl.clientWidth || 0) : 0;
+    const h = srcEl ? (srcEl.videoHeight || srcEl.clientHeight || 0) : 0;
+    if (w && h && w < minDim && h < minDim) return;
+    videoItems.set(key, { url: key, w, h, ts: ++seq, area: w * h, srcEl });
+    scheduleRender();
+  }
+
+  function tryAddVideo(video) {
+    const raw = video.currentSrc || video.src || (video.querySelector('source[src]') && video.querySelector('source[src]').src);
+    if (raw) tryAddVideoUrl(raw, video);
+    if (!video.videoWidth || !video.videoHeight) {
+      video.addEventListener('loadedmetadata', () => {
+        const key = normalize(video.currentSrc || video.src || raw || '');
+        const item = videoItems.get(key);
+        if (item) {
+          item.w = video.videoWidth || item.w || 0;
+          item.h = video.videoHeight || item.h || 0;
+          item.area = item.w * item.h;
+          scheduleRender();
+        } else {
+          tryAddVideo(video);
+        }
+      }, { once: true });
+    }
+    video.querySelectorAll('source[src]').forEach((source) => tryAddVideoUrl(source.src, video));
+  }
+
+  function scanVideoLinks() {
+    document.querySelectorAll('a[href], source[src]').forEach((el) => {
+      const raw = el.href || el.src;
+      if (isVideoUrl(raw)) tryAddVideoUrl(raw, null);
+    });
+  }
+
   function extractBgUrls(bg, sink) {
     if (!bg || bg === 'none') return;
     const re = /url\(["']?([^"')]+)["']?\)/g;
@@ -98,6 +144,8 @@
       scanTimer = null;
       // <img>
       document.querySelectorAll('img').forEach(tryAdd);
+      document.querySelectorAll('video').forEach(tryAddVideo);
+      scanVideoLinks();
       // inline style 上的 background-image(快,覆盖大多数 lightbox)
       document.querySelectorAll('[style*="background"]').forEach((el) => {
         extractBgUrls(el.style.backgroundImage, tryAddByUrl);
@@ -119,7 +167,15 @@
       for (const n of m.addedNodes) {
         if (n && n.nodeType === 1) {
           if (n.tagName === 'IMG') tryAdd(n);
-          else if (n.querySelectorAll) n.querySelectorAll('img').forEach(tryAdd);
+          else if (n.tagName === 'VIDEO') tryAddVideo(n);
+          else if (n.querySelectorAll) {
+            n.querySelectorAll('img').forEach(tryAdd);
+            n.querySelectorAll('video').forEach(tryAddVideo);
+            n.querySelectorAll('a[href], source[src]').forEach((el) => {
+              const raw = el.href || el.src;
+              if (isVideoUrl(raw)) tryAddVideoUrl(raw, null);
+            });
+          }
           // 节点自身带 inline bg
           if (n.style && n.style.backgroundImage) {
             extractBgUrls(n.style.backgroundImage, tryAddByUrl);
@@ -145,14 +201,19 @@
   }
 
   // —— 下载 ——
-  function download(url, btn) {
-    chrome.runtime.sendMessage({ action: 'download', url, filename: filenameFor(url) });
+  function download(url, btn, fallbackExt) {
+    chrome.runtime.sendMessage({ action: 'download', url, filename: filenameFor(url, fallbackExt) });
     if (btn) flashBtn(btn, '✓ 已发起', '#27ae60', 1000);
   }
   function downloadAll(btn) {
     const list = getSorted();
     if (btn) flashBtn(btn, `发起 ${list.length} 张`, '#27ae60', 1400);
     list.forEach((v, i) => setTimeout(() => download(v.url), i * 250));
+  }
+  function downloadAllVideos(btn) {
+    const videos = getSorted(videoItems);
+    if (btn) flashBtn(btn, `发起 ${videos.length} 条`, '#27ae60', 1400);
+    videos.forEach((v, i) => setTimeout(() => download(v.url, null, 'mp4'), i * 250));
   }
 
   // —— 复制到剪贴板 ——
@@ -342,8 +403,8 @@
       default:          return b.ts - a.ts;
     }
   }
-  function getSorted() {
-    return [...items.values()].sort(cmp);
+  function getSorted(source) {
+    return [...(source || items).values()].sort(cmp);
   }
 
   let renderTimer = null;
@@ -352,6 +413,8 @@
     renderTimer = requestAnimationFrame(() => {
       renderTimer = null;
       renderList();
+      renderVideoList();
+      updateCount();
     });
   }
 
@@ -442,6 +505,48 @@
     return row;
   }
 
+  function buildVideoRow(item) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:10px;align-items:center;padding:8px 10px;border-bottom:1px solid #2a2a2a;font-size:12px;';
+
+    let thumb;
+    if (item.srcEl && item.srcEl.isConnected && item.srcEl.poster) {
+      thumb = document.createElement('img');
+      thumb.src = item.srcEl.poster;
+      thumb.referrerPolicy = 'no-referrer';
+      thumb.loading = 'lazy';
+      thumb.style.cssText = 'width:72px;height:72px;object-fit:cover;border-radius:4px;flex-shrink:0;background:#222;';
+      thumb.onerror = () => { thumb.style.visibility = 'hidden'; };
+    } else {
+      thumb = document.createElement('div');
+      thumb.textContent = 'VIDEO';
+      thumb.style.cssText = 'width:72px;height:72px;border-radius:4px;flex-shrink:0;background:#222;color:#777;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;letter-spacing:0;';
+    }
+
+    const meta = document.createElement('div');
+    meta.style.cssText = 'flex:1;min-width:0;';
+    const size = document.createElement('div');
+    size.textContent = item.w && item.h ? `${item.w} × ${item.h}` : '视频';
+    size.style.cssText = 'color:#eee;font-size:13px;font-weight:600;margin-bottom:3px;';
+    const urlEl = document.createElement('div');
+    urlEl.textContent = item.url;
+    urlEl.style.cssText = 'color:#888;font-size:10px;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;';
+    urlEl.title = '点击在新标签页打开视频 · ' + item.url;
+    urlEl.onclick = () => window.open(item.url, '_blank');
+    meta.append(size, urlEl);
+
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;flex-direction:column;gap:4px;flex-shrink:0;';
+    const dlBtn = document.createElement('button');
+    dlBtn.textContent = '下载';
+    dlBtn.style.cssText = 'color:#fff;border:none;padding:5px 10px;border-radius:4px;cursor:pointer;font-size:12px;min-width:66px;transition:background 0.15s;background:#6c5ce7;';
+    dlBtn.onclick = () => download(item.url, dlBtn, 'mp4');
+
+    actions.append(dlBtn);
+    row.append(thumb, meta, actions);
+    return row;
+  }
+
   function renderList() {
     if (!list) return;
     const arr = getSorted();
@@ -462,14 +567,44 @@
       arr.forEach((it) => frag.appendChild(buildRow(it)));
       list.appendChild(frag);
     }
-    if (countEl) countEl.textContent = items.size;
+    updateCount();
+  }
+
+  function renderVideoList() {
+    if (!videoList) return;
+    const arr = getSorted(videoItems);
+    videoList.innerHTML = '';
+    if (arr.length === 0) {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'padding:28px 18px;color:#888;font-size:12px;line-height:1.8;text-align:center;';
+      empty.innerHTML =
+        `暂未扫到网页视频<br>` +
+        `<span style="font-size:11px">` +
+        `· 支持 video/source 和 mp4/webm/mov/m4v 直链<br>` +
+        `· 让目标视频加载后再点「重扫」<br>` +
+        `· blob 视频流暂不能直接下载` +
+        `</span>`;
+      videoList.appendChild(empty);
+    } else {
+      const frag = document.createDocumentFragment();
+      arr.forEach((it) => frag.appendChild(buildVideoRow(it)));
+      videoList.appendChild(frag);
+    }
+    updateCount();
+  }
+
+  function updateCount() {
+    if (!countEl) return;
+    countEl.textContent = activeTab === 'video' ? videoItems.size : items.size;
   }
 
   function rebuild() {
     items.clear();
+    videoItems.clear();
     seq = 0;
-    if (countEl) countEl.textContent = 0;
+    updateCount();
     if (list) list.innerHTML = '';
+    if (videoList) videoList.innerHTML = '';
     scheduleRender();   // 先画空状态提示
     scanAll(true);      // 深扫 computed style 的 background-image
   }
@@ -520,13 +655,16 @@
     const tabs = document.createElement('div');
     tabs.style.cssText = 'display:flex;border-bottom:1px solid #2a2a2a;background:#181818;';
     const imageTabBtn = document.createElement('button');
+    const videoTabBtn = document.createElement('button');
     const styleTabBtn = document.createElement('button');
     const tabCss = 'flex:1;background:#181818;color:#aaa;border:none;border-bottom:2px solid transparent;padding:9px 10px;cursor:pointer;font-size:12px;';
     imageTabBtn.textContent = '抓图';
+    videoTabBtn.textContent = '抓视频';
     styleTabBtn.textContent = '风格反解';
     imageTabBtn.style.cssText = tabCss;
+    videoTabBtn.style.cssText = tabCss;
     styleTabBtn.style.cssText = tabCss;
-    tabs.append(imageTabBtn, styleTabBtn);
+    tabs.append(imageTabBtn, videoTabBtn, styleTabBtn);
 
     const toolbar = document.createElement('div');
     toolbar.style.cssText = 'padding:8px 10px;border-bottom:1px solid #2a2a2a;display:flex;gap:6px;align-items:center;flex-wrap:wrap;';
@@ -543,6 +681,7 @@
     widthInput.style.cssText = 'width:70px;background:#0f0f0f;border:1px solid #333;color:#ccc;padding:5px 6px;border-radius:4px;font-size:12px;outline:none;';
     widthInput.onchange = () => {
       minDim = Number(widthInput.value) || 500;
+      if (videoWidthInput) videoWidthInput.value = minDim;
       localStorage.setItem('__hdgrab_minw', String(minDim));
       rebuild();
     };
@@ -566,8 +705,10 @@
     });
     sortSelect.onchange = () => {
       sortMode = sortSelect.value;
+      if (videoSortSelect) videoSortSelect.value = sortMode;
       localStorage.setItem('__hdgrab_sort', sortMode);
       renderList();
+      renderVideoList();
     };
 
     const rescan = document.createElement('button');
@@ -587,6 +728,67 @@
     imageTab = document.createElement('div');
     imageTab.style.cssText = 'display:flex;flex-direction:column;min-height:0;flex:1;';
     imageTab.append(toolbar, list);
+
+    const videoToolbar = document.createElement('div');
+    videoToolbar.style.cssText = 'padding:8px 10px;border-bottom:1px solid #2a2a2a;display:flex;gap:6px;align-items:center;flex-wrap:wrap;';
+    const videoLabel = document.createElement('span');
+    videoLabel.textContent = '最小尺寸';
+    videoLabel.style.cssText = 'font-size:11px;color:#aaa;';
+    const videoWidthInput = document.createElement('input');
+    videoWidthInput.type = 'number';
+    videoWidthInput.value = minDim;
+    videoWidthInput.min = '100';
+    videoWidthInput.max = '6000';
+    videoWidthInput.step = '100';
+    videoWidthInput.style.cssText = 'width:70px;background:#0f0f0f;border:1px solid #333;color:#ccc;padding:5px 6px;border-radius:4px;font-size:12px;outline:none;';
+    videoWidthInput.onchange = () => {
+      minDim = Number(videoWidthInput.value) || 500;
+      if (widthInput) widthInput.value = minDim;
+      localStorage.setItem('__hdgrab_minw', String(minDim));
+      rebuild();
+    };
+    const videoPx = document.createElement('span');
+    videoPx.textContent = 'px';
+    videoPx.style.cssText = 'font-size:11px;color:#888;';
+    const videoSortLabel = document.createElement('span');
+    videoSortLabel.textContent = '排序';
+    videoSortLabel.style.cssText = 'font-size:11px;color:#aaa;margin-left:8px;';
+    const videoSortSelect = document.createElement('select');
+    videoSortSelect.style.cssText = 'background:#0f0f0f;border:1px solid #333;color:#ccc;padding:5px 6px;border-radius:4px;font-size:12px;outline:none;cursor:pointer;';
+    [
+      ['time-desc', '最新加载'],
+      ['time-asc',  '最早加载'],
+      ['size-desc', '尺寸 大→小'],
+      ['size-asc',  '尺寸 小→大'],
+    ].forEach(([v, t]) => {
+      const o = document.createElement('option');
+      o.value = v; o.textContent = t;
+      if (v === sortMode) o.selected = true;
+      videoSortSelect.appendChild(o);
+    });
+    videoSortSelect.onchange = () => {
+      sortMode = videoSortSelect.value;
+      if (sortSelect) sortSelect.value = sortMode;
+      localStorage.setItem('__hdgrab_sort', sortMode);
+      renderList();
+      renderVideoList();
+    };
+    const videoRescan = document.createElement('button');
+    videoRescan.textContent = '重扫';
+    videoRescan.style.cssText = 'background:#444;color:#fff;border:none;padding:5px 10px;border-radius:4px;cursor:pointer;font-size:12px;';
+    videoRescan.onclick = () => { flashBtn(videoRescan, '扫描中…', '#555', 700); rebuild(); };
+    const videoDlAll = document.createElement('button');
+    videoDlAll.textContent = '全部下载';
+    videoDlAll.style.cssText = 'background:#6c5ce7;color:#fff;border:none;padding:5px 10px;border-radius:4px;cursor:pointer;font-size:12px;margin-left:auto;';
+    videoDlAll.onclick = () => downloadAllVideos(videoDlAll);
+    videoToolbar.append(videoLabel, videoWidthInput, videoPx, videoSortLabel, videoSortSelect, videoRescan, videoDlAll);
+
+    videoList = document.createElement('div');
+    videoList.style.cssText = 'overflow-y:auto;flex:1;';
+
+    videoTab = document.createElement('div');
+    videoTab.style.cssText = 'display:none;flex-direction:column;min-height:0;flex:1;';
+    videoTab.append(videoToolbar, videoList);
 
     styleTab = document.createElement('div');
     styleTab.style.cssText = 'display:none;flex-direction:column;gap:10px;padding:12px;overflow-y:auto;flex:1;min-height:0;';
@@ -654,18 +856,26 @@
 
     function switchTab(name) {
       const styleActive = name === 'style';
-      imageTab.style.display = styleActive ? 'none' : 'flex';
+      const imageActive = name === 'image';
+      const videoActive = name === 'video';
+      activeTab = name;
+      imageTab.style.display = imageActive ? 'flex' : 'none';
+      videoTab.style.display = videoActive ? 'flex' : 'none';
       styleTab.style.display = styleActive ? 'flex' : 'none';
-      imageTabBtn.style.color = styleActive ? '#aaa' : '#fff';
+      imageTabBtn.style.color = imageActive ? '#fff' : '#aaa';
+      videoTabBtn.style.color = videoActive ? '#fff' : '#aaa';
       styleTabBtn.style.color = styleActive ? '#fff' : '#aaa';
-      imageTabBtn.style.borderBottomColor = styleActive ? 'transparent' : '#6c5ce7';
+      imageTabBtn.style.borderBottomColor = imageActive ? '#6c5ce7' : 'transparent';
+      videoTabBtn.style.borderBottomColor = videoActive ? '#e17055' : 'transparent';
       styleTabBtn.style.borderBottomColor = styleActive ? '#00a884' : 'transparent';
       if (styleActive) setTimeout(() => stylePreview && stylePreview.focus(), 0);
+      updateCount();
     }
     imageTabBtn.onclick = () => switchTab('image');
+    videoTabBtn.onclick = () => switchTab('video');
     styleTabBtn.onclick = () => switchTab('style');
 
-    panel.append(header, tabs, imageTab, styleTab);
+    panel.append(header, tabs, imageTab, videoTab, styleTab);
     document.body.appendChild(panel);
     countEl = panel.querySelector('#__hdgrab_count');
     switchTab('image');
@@ -692,7 +902,7 @@
     if (!document.body) return setTimeout(boot, 100);
     buildPanel();
     obs.observe(document.documentElement, {
-      subtree: true, childList: true, attributes: true, attributeFilter: ['src', 'srcset'],
+      subtree: true, childList: true, attributes: true, attributeFilter: ['src', 'srcset', 'href'],
     });
     scanAll();
   }
