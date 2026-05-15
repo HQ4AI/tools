@@ -135,7 +135,6 @@
         bitrate: Number(json.bitrate || 0),
         duration: Number(json.duration_s || 0),
         tag: json.vencode_tag || '',
-        isInstagram: /(^|\.)cdninstagram\.com$/i.test(u.hostname),
       };
     } catch {
       return {};
@@ -143,15 +142,6 @@
   }
 
   function videoIdentity(url, info) {
-    if (info && info.isInstagram) {
-      const sizePart = info.tag && info.tag.match(/_(\d{3,4}p)\b/i);
-      return [
-        'ig-current',
-        info.duration || '',
-        sizePart ? sizePart[1].toLowerCase() : '',
-        info.tag ? info.tag.replace(/^.*?(clips|reels|feed)/i, '$1').replace(/[_-]?c\d+\b/ig, '') : '',
-      ].join(':');
-    }
     if (info && info.assetId) return 'ig:' + info.assetId;
     try {
       const u = new URL(url);
