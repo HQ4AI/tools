@@ -1,16 +1,14 @@
 # Sensory Assassin
 
-Chrome MV3 extension for collecting high-resolution images and videos from the current page, plus reverse-engineering image style prompts through a local Shadow Lantern bridge.
+Chrome MV3 extension for collecting high-resolution images from the current page and reverse-engineering image style prompts through a local Shadow Lantern bridge.
 
 ## Features
 
 - Toggle the floating panel with the extension icon or `Alt+Shift+G`.
 - Scan `<img>` tags and CSS background images.
-- Scan page videos from `<video>`, `<source>`, and direct `.mp4` / `.webm` / `.mov` / `.m4v` links.
-- Filter images and videos by minimum dimension when dimensions are available.
+- Filter images by minimum dimension.
 - Sort by load time or image area.
 - Download one image or all matched images.
-- Download one video or all matched videos.
 - Copy an image to the clipboard through the extension background fetch path.
 - Paste a reference image and run Shadow Lantern style reverse-engineering.
 - Choose granularity:
