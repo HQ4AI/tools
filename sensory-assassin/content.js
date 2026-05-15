@@ -208,6 +208,32 @@
     video.querySelectorAll('source[src]').forEach((source) => tryAddVideoUrl(source.src, video));
   }
 
+  function visibleVideoElements() {
+    return [...document.querySelectorAll('video')].filter((video) => {
+      const rect = video.getBoundingClientRect();
+      return rect.width > 80 && rect.height > 80 && rect.bottom > 0 && rect.right > 0 &&
+        rect.top < window.innerHeight && rect.left < window.innerWidth;
+    }).sort((a, b) => {
+      const ar = a.getBoundingClientRect();
+      const br = b.getBoundingClientRect();
+      return (br.width * br.height) - (ar.width * ar.height);
+    });
+  }
+
+  function attachVisibleVideoThumbs() {
+    const videos = visibleVideoElements();
+    if (!videos.length || !videoItems.size) return;
+    const primary = videos[0];
+    for (const item of videoItems.values()) {
+      if (!item.srcEl || !item.srcEl.isConnected) item.srcEl = primary;
+      if (!item.w || !item.h) {
+        item.w = primary.videoWidth || Math.round(primary.getBoundingClientRect().width) || item.w || 0;
+        item.h = primary.videoHeight || Math.round(primary.getBoundingClientRect().height) || item.h || 0;
+        item.area = item.w * item.h;
+      }
+    }
+  }
+
   function scanVideoLinks() {
     document.querySelectorAll('a[href], source[src]').forEach((el) => {
       const raw = el.href || el.src;
@@ -270,6 +296,7 @@
       scanVideoAttributes();
       scanScriptVideos();
     }
+    attachVisibleVideoThumbs();
   }
 
   function extractBgUrls(bg, sink) {
@@ -646,12 +673,49 @@
     return row;
   }
 
+  function buildVideoThumbCanvas(video) {
+    const box = 72;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const canvas = document.createElement('canvas');
+    canvas.style.cssText = `width:${box}px;height:${box}px;border-radius:4px;flex-shrink:0;background:#222;display:block;`;
+    canvas.width = Math.round(box * dpr);
+    canvas.height = Math.round(box * dpr);
+    const ctx = canvas.getContext('2d');
+
+    function paint() {
+      try {
+        const w = video.videoWidth || video.clientWidth || 0;
+        const h = video.videoHeight || video.clientHeight || 0;
+        if (!w || !h) return false;
+        let sx, sy, s;
+        if (w > h) { s = h; sx = (w - h) / 2; sy = 0; }
+        else       { s = w; sx = 0;           sy = (h - w) / 2; }
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(video, sx, sy, s, s, 0, 0, canvas.width, canvas.height);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    if (!paint()) {
+      ctx.fillStyle = '#222'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#777'; ctx.font = `${10 * dpr}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('VIDEO', canvas.width / 2, canvas.height / 2);
+      video.addEventListener('loadeddata', paint, { once: true });
+      video.addEventListener('timeupdate', paint, { once: true });
+    }
+    return canvas;
+  }
+
   function buildVideoRow(item) {
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;gap:10px;align-items:center;padding:8px 10px;border-bottom:1px solid #2a2a2a;font-size:12px;';
 
     let thumb;
-    if (item.srcEl && item.srcEl.isConnected && item.srcEl.poster) {
+    if (item.srcEl && item.srcEl.isConnected && (item.srcEl.videoWidth || item.srcEl.readyState >= 2)) {
+      thumb = buildVideoThumbCanvas(item.srcEl);
+    } else if (item.srcEl && item.srcEl.isConnected && item.srcEl.poster) {
       thumb = document.createElement('img');
       thumb.src = item.srcEl.poster;
       thumb.referrerPolicy = 'no-referrer';
